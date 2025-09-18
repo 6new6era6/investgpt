@@ -3,8 +3,18 @@ header('Content-Type: text/event-stream');
 header('Cache-Control: no-cache');
 header('Connection: keep-alive');
 
-// --- Конфіг ---
-$OPENAI_API_KEY = getenv('OPENAI_API_KEY') ?: 'YOUR_OPENAI_KEY';
+$OPENAI_API_KEY = getenv('OPENAI_API_KEY');
+$OPENAI_API_KEY_FALLBACK = false; // don't fallback to an in-repo key
+// Якщо ключ не встановлено — повертаємо дружню помилку і лог для девелопера, без виведення самого ключа
+if (!$OPENAI_API_KEY) {
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'ok' => false,
+        'error' => 'OPENAI_API_KEY is not set on the server. Set environment variable OPENAI_API_KEY and restart PHP.'
+    ]);
+    exit;
+}
 $OPENAI_URL = 'https://api.openai.com/v1/responses';
 $MAX_RETRIES = 5;
 $RETRY_DELAYS = [200, 400, 800, 1600, 3200]; // ms
