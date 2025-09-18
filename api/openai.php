@@ -102,29 +102,87 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
 debug_log('Setting up response streaming');
 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
     static $chunkCount = 0;
-    $chunkCount++;
     static $buffer = '';
+    static $jsonDepth = 0;
     
+    $chunkCount++;
     // Додаємо новий чанк до буфера
     $buffer .= $data;
     
+    // Функція для перевірки повного JSON об'єкта
+    function isCompleteJson($str) {
+        $depth = 0;
+        $inString = false;
+        $escape = false;
+        
+        for ($i = 0; $i < strlen($str); $i++) {
+            $char = $str[$i];
+            
+            if ($escape) {
+                $escape = false;
+                continue;
+            }
+            
+            if ($char === '\\' && !$escape) {
+                $escape = true;
+                continue;
+            }
+            
+            if ($char === '"' && !$escape) {
+                $inString = !$inString;
+                continue;
+            }
+            
+            if (!$inString) {
+                if ($char === '{' || $char === '[') {
+                    $depth++;
+                } else if ($char === '}' || $char === ']') {
+                    $depth--;
+                }
+            }
+        }
+        
+        return $depth === 0 && !$inString && !$escape;
+    }
+    
     // Шукаємо повні рядки у буфері
     while (($pos = strpos($buffer, "\n\n")) !== false) {
-        // Вилучаємо повний рядок з буфера
-        $line = substr($buffer, 0, $pos + 2);
-        $buffer = substr($buffer, $pos + 2);
+        // Отримуємо рядок до \n\n
+        $line = substr($buffer, 0, $pos);
         
-        if (strpos($line, '"console":') !== false) {
-            // Це наш debug лог - додаємо спеціальний маркер
-            echo "data: __DEBUG__" . rtrim($line) . "\n\n";
+        if (strpos($line, 'data: ') === 0) {
+            $jsonData = substr($line, 6); // Пропускаємо 'data: '
+            
+            if ($jsonData === '[DONE]') {
+                // Спеціальний маркер завершення
+                echo $line . "\n\n";
+                $buffer = substr($buffer, $pos + 2);
+                continue;
+            }
+            
+            // Перевіряємо чи це повний JSON
+            if (isCompleteJson($jsonData)) {
+                if (strpos($jsonData, '"console":') !== false) {
+                    // Це наш debug лог
+                    echo "data: __DEBUG__" . $jsonData . "\n\n";
+                } else {
+                    // Це дані від OpenAI
+                    echo $line . "\n\n";
+                }
+                $buffer = substr($buffer, $pos + 2);
+            } else {
+                // Неповний JSON, чекаємо наступного чанку
+                break;
+            }
         } else {
-            // Це дані від OpenAI - відправляємо як є
-            echo $line;
+            // Невідомий формат, пропускаємо
+            $buffer = substr($buffer, $pos + 2);
         }
     }
     
     // Log chunk details (using error_log щоб уникнути рекурсії)
-    error_log(sprintf('[PHP Debug] Received chunk #%d (length: %d)', $chunkCount, strlen($data)));
+    error_log(sprintf('[PHP Debug] Received chunk #%d (length: %d, buffer: %d)', 
+        $chunkCount, strlen($data), strlen($buffer)));
     
     // Ensure it is sent to the client immediately
     if (ob_get_level()) ob_flush();
