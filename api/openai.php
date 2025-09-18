@@ -5,8 +5,15 @@ header('Connection: keep-alive');
 
 // Конфігурація
 $OPENAI_API_KEY = getenv('OPENAI_API_KEY');
+// Fallback: try reading from a local file (placed outside webroot or protected), e.g. ../.openai_key
 if (!$OPENAI_API_KEY) {
-    echo "data: " . json_encode(['error' => 'OpenAI API key not configured']) . "\n\n";
+    $keyFile = __DIR__ . '/../.openai_key';
+    if (file_exists($keyFile)) {
+        $OPENAI_API_KEY = trim(file_get_contents($keyFile));
+    }
+}
+if (!$OPENAI_API_KEY) {
+    echo "data: " . json_encode(['error' => 'OpenAI API key not configured. Set OPENAI_API_KEY env or place key in .openai_key']) . "\n\n";
     exit;
 }
 
