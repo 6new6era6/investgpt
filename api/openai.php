@@ -7,6 +7,14 @@ header('Connection: keep-alive');
 $OPENAI_API_KEY = getenv('OPENAI_API_KEY');
 // Fallback: try reading from a local file (placed outside webroot or protected), e.g. ../.openai_key
 if (!$OPENAI_API_KEY) {
+    // Try a PHP file inside api/ that returns the key: api/openai_key.php
+    $phpKeyFile = __DIR__ . '/openai_key.php';
+    if (file_exists($phpKeyFile)) {
+        $val = include $phpKeyFile;
+        if ($val && is_string($val)) {
+            $OPENAI_API_KEY = trim($val);
+        }
+    }
     $keyFile = __DIR__ . '/../.openai_key';
     if (file_exists($keyFile)) {
         $OPENAI_API_KEY = trim(file_get_contents($keyFile));
