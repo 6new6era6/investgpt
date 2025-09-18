@@ -2,7 +2,7 @@
 // Перевірка, чи користувач прийшов з демо
 session_start();
 if (!isset($_SESSION['demo_completed']) || $_SESSION['demo_completed'] !== true) {
-    header('Location: /chat/');
+    header('Location: lander/invest-gpt/chat/');
     exit;
 }
 ?>
