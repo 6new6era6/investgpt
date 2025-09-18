@@ -100,43 +100,53 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
 
 // Stream the response back to client as SSE
 debug_log('Setting up response streaming');
-curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
+
+// Буфер для накопичення даних між викликами
+$streamBuffer = '';
+
+curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use (&$streamBuffer) {
     static $chunkCount = 0;
     $chunkCount++;
     
-    error_log(sprintf('[PHP Debug] Processing chunk #%d (length: %d)', $chunkCount, strlen($data)));
+    // Додаємо нові дані до буфера
+    $streamBuffer .= $data;
     
-    // OpenAI відправляє дані у форматі "data: {...}\n\n"
-    $chunks = explode("\n\n", $data);
-    foreach ($chunks as $chunk) {
-        $chunk = trim($chunk);
-        if (empty($chunk)) continue;
+    // Шукаємо завершені події SSE (data: ... + порожній рядок)
+    while (preg_match('/^data: (.+?)\n\n/s', $streamBuffer, $matches)) {
+        $event = $matches[0];
+        $payload = trim($matches[1]);
         
-        if (strpos($chunk, 'data: ') === 0) {
-            $payload = substr($chunk, 6); // Пропускаємо 'data: '
-            
-            if ($payload === '[DONE]') {
-                echo "data: [DONE]\n\n";
-                continue;
-            }
-            
-            // Перевіряємо чи це наш debug лог
-            if (strpos($payload, '"console":') !== false) {
-                echo "data: __DEBUG__" . $payload . "\n\n";
-            } else {
-                // Це дані від OpenAI - відправляємо як є
-                echo "data: " . $payload . "\n\n";
-            }
+        // Видаляємо оброблену подію з буфера
+        $streamBuffer = substr($streamBuffer, strlen($event));
+        
+        // Обробка події
+        if ($payload === '[DONE]') {
+            echo "data: [DONE]\n\n";
+        } else if (strpos($payload, '"console"') !== false) {
+            // Наш лог
+            echo "data: __DEBUG__" . $payload . "\n\n";
+        } else if (strpos($payload, '"choices"') !== false) {
+            // OpenAI chunk
+            echo "data: " . $payload . "\n\n";
         } else {
-            // Якщо це частина JSON без префіксу data:
-            // додаємо префікс та відправляємо
-            echo "data: " . $chunk . "\n\n";
+            // Інші дані (на всяк випадок)
+            error_log("[Debug] Unknown payload type: " . substr($payload, 0, 100));
+            echo "data: " . $payload . "\n\n";
         }
+        
+        // Відправляємо відразу
+        if (ob_get_level()) ob_flush();
+        flush();
     }
     
-    // Ensure it is sent to the client immediately
-    if (ob_get_level()) ob_flush();
-    flush();
+    error_log(sprintf(
+        '[PHP Debug] Chunk #%d (in: %d bytes, buffer: %d bytes)', 
+        $chunkCount, 
+        strlen($data),
+        strlen($streamBuffer)
+    ));
+    
+    return strlen($data);
     
     return strlen($data);
 });
