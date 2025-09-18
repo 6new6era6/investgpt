@@ -49,28 +49,40 @@ array_unshift($input['messages'], [
 
 // Налаштування CURL
 $ch = curl_init($OPENAI_URL);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_HTTPHEADER => [
-        'Content-Type: application/json',
-        'Authorization: Bearer ' . $OPENAI_API_KEY
-    ],
-    CURLOPT_POSTFIELDS => json_encode([
-        'model' => $MODEL,
-        'messages' => $input['messages'],
-        'temperature' => $TEMPERATURE,
-        'max_tokens' => $MAX_TOKENS,
-        'stream' => true
-    ])
-]);
 
-// Стрімінг відповіді
-$response = curl_exec($ch);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    'Content-Type: application/json',
+    'Authorization: Bearer ' . $OPENAI_API_KEY
+]);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+    'model' => $MODEL,
+    'messages' => $input['messages'],
+    'temperature' => $TEMPERATURE,
+    'max_tokens' => $MAX_TOKENS,
+    'stream' => true
+]));
+
+// Stream the response back to client as SSE
+curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
+    // OpenAI returns chunks already prefixed like: "data: { ... }\n\n" or "data: [DONE]\n\n"
+    // We forward them directly to the client
+    echo $data;
+    // Ensure it is sent to the client immediately
+    if (ob_get_level()) ob_flush();
+    flush();
+    return strlen($data);
+});
+
+$res = curl_exec($ch);
 if (curl_errno($ch)) {
     echo "data: " . json_encode(['error' => 'OpenAI API error: ' . curl_error($ch)]) . "\n\n";
+    flush();
     exit;
 }
 
-echo $response;
-flush();
+// Make sure any trailing data is flushed
+if ($res !== false) {
+    if (ob_get_level()) ob_flush();
+    flush();
+}
