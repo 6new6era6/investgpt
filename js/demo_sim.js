@@ -40,7 +40,7 @@
     // Завантаження даних
     async function loadChartData() {
         try {
-            const response = await fetch('/demo/data/crypto_btc_usd.json');
+            const response = await fetch('../demo/data/crypto_btc_usd.json');
             const data = await response.json();
             
             candleSeries.setData(data.candles);
