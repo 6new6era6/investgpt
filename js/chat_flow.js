@@ -152,16 +152,22 @@ const logger = {
                 for (const line of lines) {
                     if (!line.trim() || !line.startsWith('data: ')) continue;
                     
-                    const payload = line.slice(5).trim();
+                    let payload = line.slice(5).trim();
                     if (payload === '[DONE]') {
                         logger.debug('Stream Done Marker', { id: requestId });
                         continue;
                     }
                     
+                    // Перевіряємо чи це debug-повідомлення
+                    const isDebug = payload.startsWith('__DEBUG__');
+                    if (isDebug) {
+                        payload = payload.slice(9); // Видаляємо маркер
+                    }
+                    
                     let data;
                     try {
                         data = JSON.parse(payload);
-                        if (data.console) {
+                        if (isDebug && data.console) {
                             // Handle server-side logs
                             const log = data.console;
                             if (log.type === 'debug') {
@@ -172,11 +178,14 @@ const logger = {
                             continue;
                         }
                     } catch (err) {
-                        logger.error('Parse Error', {
-                            id: requestId,
-                            error: err,
-                            payload
-                        });
+                        // Тільки логуємо помилки парсингу для не-debug повідомлень
+                        if (!isDebug) {
+                            logger.error('Parse Error', {
+                                id: requestId,
+                                error: err,
+                                payload
+                            });
+                        }
                         continue;
                     }
                     

@@ -103,13 +103,28 @@ debug_log('Setting up response streaming');
 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
     static $chunkCount = 0;
     $chunkCount++;
+    static $buffer = '';
     
-    // Log chunk details
-    debug_log('Received chunk #' . $chunkCount, ['length' => strlen($data)]);
+    // Додаємо новий чанк до буфера
+    $buffer .= $data;
     
-    // OpenAI returns chunks already prefixed like: "data: { ... }\n\n" or "data: [DONE]\n\n"
-    // We forward them directly to the client
-    echo $data;
+    // Шукаємо повні рядки у буфері
+    while (($pos = strpos($buffer, "\n\n")) !== false) {
+        // Вилучаємо повний рядок з буфера
+        $line = substr($buffer, 0, $pos + 2);
+        $buffer = substr($buffer, $pos + 2);
+        
+        if (strpos($line, '"console":') !== false) {
+            // Це наш debug лог - додаємо спеціальний маркер
+            echo "data: __DEBUG__" . rtrim($line) . "\n\n";
+        } else {
+            // Це дані від OpenAI - відправляємо як є
+            echo $line;
+        }
+    }
+    
+    // Log chunk details (using error_log щоб уникнути рекурсії)
+    error_log(sprintf('[PHP Debug] Received chunk #%d (length: %d)', $chunkCount, strlen($data)));
     
     // Ensure it is sent to the client immediately
     if (ob_get_level()) ob_flush();
