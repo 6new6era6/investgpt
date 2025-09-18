@@ -102,87 +102,37 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
 debug_log('Setting up response streaming');
 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
     static $chunkCount = 0;
-    static $buffer = '';
-    static $jsonDepth = 0;
-    
     $chunkCount++;
-    // Додаємо новий чанк до буфера
-    $buffer .= $data;
     
-    // Функція для перевірки повного JSON об'єкта
-    function isCompleteJson($str) {
-        $depth = 0;
-        $inString = false;
-        $escape = false;
-        
-        for ($i = 0; $i < strlen($str); $i++) {
-            $char = $str[$i];
-            
-            if ($escape) {
-                $escape = false;
-                continue;
-            }
-            
-            if ($char === '\\' && !$escape) {
-                $escape = true;
-                continue;
-            }
-            
-            if ($char === '"' && !$escape) {
-                $inString = !$inString;
-                continue;
-            }
-            
-            if (!$inString) {
-                if ($char === '{' || $char === '[') {
-                    $depth++;
-                } else if ($char === '}' || $char === ']') {
-                    $depth--;
-                }
-            }
-        }
-        
-        return $depth === 0 && !$inString && !$escape;
-    }
+    error_log(sprintf('[PHP Debug] Processing chunk #%d (length: %d)', $chunkCount, strlen($data)));
     
-    // Шукаємо повні рядки у буфері
-    while (($pos = strpos($buffer, "\n\n")) !== false) {
-        // Отримуємо рядок до \n\n
-        $line = substr($buffer, 0, $pos);
+    // OpenAI відправляє дані у форматі "data: {...}\n\n"
+    $chunks = explode("\n\n", $data);
+    foreach ($chunks as $chunk) {
+        $chunk = trim($chunk);
+        if (empty($chunk)) continue;
         
-        if (strpos($line, 'data: ') === 0) {
-            $jsonData = substr($line, 6); // Пропускаємо 'data: '
+        if (strpos($chunk, 'data: ') === 0) {
+            $payload = substr($chunk, 6); // Пропускаємо 'data: '
             
-            if ($jsonData === '[DONE]') {
-                // Спеціальний маркер завершення
-                echo $line . "\n\n";
-                $buffer = substr($buffer, $pos + 2);
+            if ($payload === '[DONE]') {
+                echo "data: [DONE]\n\n";
                 continue;
             }
             
-            // Перевіряємо чи це повний JSON
-            if (isCompleteJson($jsonData)) {
-                if (strpos($jsonData, '"console":') !== false) {
-                    // Це наш debug лог
-                    echo "data: __DEBUG__" . $jsonData . "\n\n";
-                } else {
-                    // Це дані від OpenAI
-                    echo $line . "\n\n";
-                }
-                $buffer = substr($buffer, $pos + 2);
+            // Перевіряємо чи це наш debug лог
+            if (strpos($payload, '"console":') !== false) {
+                echo "data: __DEBUG__" . $payload . "\n\n";
             } else {
-                // Неповний JSON, чекаємо наступного чанку
-                break;
+                // Це дані від OpenAI - відправляємо як є
+                echo "data: " . $payload . "\n\n";
             }
         } else {
-            // Невідомий формат, пропускаємо
-            $buffer = substr($buffer, $pos + 2);
+            // Якщо це частина JSON без префіксу data:
+            // додаємо префікс та відправляємо
+            echo "data: " . $chunk . "\n\n";
         }
     }
-    
-    // Log chunk details (using error_log щоб уникнути рекурсії)
-    error_log(sprintf('[PHP Debug] Received chunk #%d (length: %d, buffer: %d)', 
-        $chunkCount, strlen($data), strlen($buffer)));
     
     // Ensure it is sent to the client immediately
     if (ob_get_level()) ob_flush();
