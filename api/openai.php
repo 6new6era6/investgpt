@@ -109,18 +109,24 @@ function findCompleteJson($text, &$start, &$end) {
     $len = strlen($text);
     $inString = false;
     $escape = false;
-    $depth = 0;
+    $objectDepth = 0;
+    $arrayDepth = 0;
     $start = -1;
     
     for ($i = 0; $i < $len; $i++) {
         $char = $text[$i];
+        
+        // Пропускаємо пробільні символи до початку об'єкта/масиву
+        if ($start === -1 && preg_match('/\s/', $char)) {
+            continue;
+        }
         
         if ($escape) {
             $escape = false;
             continue;
         }
         
-        if ($char === '\\') {
+        if ($char === '\\' && !$escape) {
             $escape = true;
             continue;
         }
@@ -131,15 +137,50 @@ function findCompleteJson($text, &$start, &$end) {
         }
         
         if (!$inString) {
-            if ($char === '{') {
-                if ($depth === 0) $start = $i;
-                $depth++;
-            } else if ($char === '}') {
-                $depth--;
-                if ($depth === 0 && $start !== -1) {
-                    $end = $i + 1;
-                    return true;
-                }
+            switch ($char) {
+                case '{':
+                    if ($objectDepth === 0 && $arrayDepth === 0) {
+                        $start = $i;
+                    }
+                    $objectDepth++;
+                    break;
+                    
+                case '}':
+                    $objectDepth--;
+                    if ($objectDepth === 0 && $arrayDepth === 0 && $start !== -1) {
+                        // Знайшли кінець об'єкта
+                        $end = $i + 1;
+                        // Перевіряємо що це валідний JSON
+                        $json = substr($text, $start, $end - $start);
+                        if (json_decode($json) !== null) {
+                            return true;
+                        }
+                        // Якщо не валідний - продовжуємо пошук
+                        $start = -1;
+                    }
+                    break;
+                    
+                case '[':
+                    if ($objectDepth === 0 && $arrayDepth === 0) {
+                        $start = $i;
+                    }
+                    $arrayDepth++;
+                    break;
+                    
+                case ']':
+                    $arrayDepth--;
+                    if ($arrayDepth === 0 && $objectDepth === 0 && $start !== -1) {
+                        // Знайшли кінець масиву
+                        $end = $i + 1;
+                        // Перевіряємо що це валідний JSON
+                        $json = substr($text, $start, $end - $start);
+                        if (json_decode($json) !== null) {
+                            return true;
+                        }
+                        // Якщо не валідний - продовжуємо пошук
+                        $start = -1;
+                    }
+                    break;
             }
         }
     }
@@ -153,43 +194,61 @@ curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use (&$streamBuffer
     // Додаємо нові дані до буфера
     $streamBuffer .= $data;
     
-    // Шукаємо та обробляємо всі повні події у буфері
-    while (true) {
-        // Спочатку шукаємо маркер "data: "
-        $pos = strpos($streamBuffer, 'data: ');
-        if ($pos === false) break;
+    // Розділяємо буфер на рядки
+    $lines = explode("\n", $streamBuffer);
+    $newBuffer = '';
+    $processedAny = false;
+    
+    // Обробляємо кожен рядок
+    foreach ($lines as $i => $line) {
+        $line = trim($line);
+        if (empty($line)) continue;
         
-        // Отримуємо текст після "data: "
-        $text = substr($streamBuffer, $pos + 6);
+        // Якщо це не останній рядок або він закінчується на \n
+        $isComplete = ($i < count($lines) - 1) || (substr($streamBuffer, -1) === "\n");
         
-        if (trim($text) === '[DONE]') {
-            // Спеціальний маркер кінця потоку
-            echo "data: [DONE]\n\n";
-            $streamBuffer = substr($streamBuffer, $pos + 11);
-            continue;
-        }
-        
-        // Шукаємо повний JSON об'єкт
-        $start = $end = 0;
-        if (findCompleteJson($text, $start, $end)) {
-            $json = substr($text, $start, $end - $start);
+        if (strpos($line, 'data: ') === 0) {
+            $payload = substr($line, 6);
             
-            // Перевіряємо тип даних
-            if (strpos($json, '"console"') !== false) {
-                echo "data: __DEBUG__" . $json . "\n\n";
-            } else {
-                echo "data: " . $json . "\n\n";
+            if ($payload === '[DONE]') {
+                echo "data: [DONE]\n\n";
+                $processedAny = true;
+                continue;
             }
             
-            // Видаляємо оброблені дані з буфера
-            $streamBuffer = substr($streamBuffer, $pos + 6 + $end);
+            // Якщо рядок не закінчений, зберігаємо його
+            if (!$isComplete) {
+                $newBuffer = $line;
+                break;
+            }
             
-            if (ob_get_level()) ob_flush();
-            flush();
+            // Перевіряємо чи це повний JSON
+            $start = $end = 0;
+            if (findCompleteJson($payload, $start, $end)) {
+                $json = substr($payload, $start, $end - $start);
+                
+                // Перевіряємо тип даних
+                if (strpos($json, '"console"') !== false) {
+                    echo "data: __DEBUG__" . $json . "\n\n";
+                } else {
+                    echo "data: " . $json . "\n\n";
+                }
+                $processedAny = true;
+            } else {
+                $newBuffer .= $line . "\n";
+            }
         } else {
-            // Якщо не знайшли повний JSON, чекаємо наступної порції даних
-            break;
+            $newBuffer .= $line . "\n";
         }
+    }
+    
+    // Оновлюємо буфер
+    $streamBuffer = $newBuffer;
+    
+    // Відправляємо дані якщо щось обробили
+    if ($processedAny && ob_get_level()) {
+        ob_flush();
+        flush();
     }
     
     // Очищаємо старі дані з буфера (залишаємо тільки останні 1000 байт)
