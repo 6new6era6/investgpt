@@ -57,7 +57,7 @@
         try {
             context.messages.push({ role: 'user', content: message });
             
-            const response = await fetch('/api/openai.php', {
+            const response = await fetch('lander/invest-gpt/api/openai.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(context)
