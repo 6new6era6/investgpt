@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Chat — InvestGPT</title>
+  <link rel="stylesheet" href="/css/chat.css">
+</head>
+<body>
+  <main class="chat-root">
+    <header>
+      <h1>InvestGPT — Коротке опитування</h1>
+    </header>
+    <section id="chat" class="chat-window"></section>
+    <form id="chat-form" class="chat-form" onsubmit="return false;">
+      <input id="chat-input" type="text" placeholder="Напишіть відповідь..." autocomplete="off">
+      <button id="chat-send" type="button">Відправити</button>
+    </form>
+  </main>
+  <script src="/js/jquery-3.4.1.min.js"></script>
+  <script src="/js/chat_flow.js"></script>
+</body>
+</html>
