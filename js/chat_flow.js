@@ -80,12 +80,21 @@
                 
                 for (const line of lines) {
                     if (!line.trim() || !line.startsWith('data: ')) continue;
-                    const data = JSON.parse(line.slice(5));
+                    const payload = line.slice(5).trim();
+                    // OpenAI may send a data: [DONE] sentinel
+                    if (payload === '[DONE]') continue;
+                    let data;
+                    try {
+                        data = JSON.parse(payload);
+                    } catch (err) {
+                        console.warn('Could not parse SSE payload:', payload, err);
+                        continue;
+                    }
                     
                     if (data.error) {
                         throw new Error(data.error);
                     }
-                    
+
                     accumulated += data.content || '';
                     botMessage.textContent = accumulated;
                     chat.scrollTop = chat.scrollHeight;
