@@ -6,6 +6,7 @@
     <title>InvestGPT — Демо</title>
     <link rel="stylesheet" href="/css/demo.css">
     <link rel="shortcut icon" type="image/x-icon" href="/images/favicon.ico">
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <main class="demo-root">
@@ -14,15 +15,11 @@
             <p>Подивіться, як працює наша стратегія</p>
         </header>
         
-        <section id="chart">
-            <!-- Chart will be rendered here -->
-        </section>
+        <section id="chart"></section>
         
-        <section id="trades">
-            <!-- Trade list will appear here -->
-        </section>
+        <section id="trades" class="trades-list"></section>
         
-        <button id="start-demo">Запустити демо</button>
+        <button id="start-demo" disabled>Завантаження...</button>
         
         <footer>
             <small>* Це освітня демонстрація. Минула доходність не гарантує майбутніх результатів.</small>

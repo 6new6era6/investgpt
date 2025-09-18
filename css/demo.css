@@ -1,8 +1,138 @@
-/* AI-технологічний стиль для демо */
-:root{--bg:#020316;--panel:#081126;--accent:#6c8cff;--glow:#00ffd5}
-body{margin:0;font-family:Inter, Roboto, system-ui, 'Segoe UI', sans-serif;background:linear-gradient(180deg,#010113,#06102b);color:#eaf6ff}
-.demo-root{padding:20px;display:flex;flex-direction:column;align-items:center}
-#chart{width:90%;max-width:980px;border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 40px rgba(2,6,23,0.6);display:flex;align-items:center;justify-content:center;color:#89f3ff}
-#trades{width:90%;max-width:980px;margin-top:12px}
-.trade{padding:10px;border-radius:8px;margin:6px 0;background:linear-gradient(90deg, rgba(108,140,255,0.04), rgba(0,255,213,0.02));border:1px solid rgba(255,255,255,0.02)}
-#start-demo{margin-top:16px;background:linear-gradient(90deg,var(--accent),var(--glow));color:#001;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;font-weight:700}
+/* Стилі для демо-сторінки */
+:root {
+    --bg: #131722;
+    --panel: #1e222d;
+    --text: #d9d9d9;
+    --accent: #00ffd5;
+    --profit: #26a69a;
+    --loss: #ef5350;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.demo-root {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+header p {
+    margin: 10px 0 0;
+    color: rgba(255,255,255,0.7);
+}
+
+#chart {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.trades-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 20px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.trade {
+    background: var(--panel);
+    border-radius: 6px;
+    padding: 12px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.trade-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.trade-type {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.trade-time {
+    color: rgba(255,255,255,0.5);
+    font-size: 0.9em;
+}
+
+.trade-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.trade-price {
+    font-family: monospace;
+    font-size: 1.1em;
+}
+
+.trade-result {
+    font-weight: 600;
+}
+
+.trade-result.profit {
+    color: var(--profit);
+}
+
+.trade-result.loss {
+    color: var(--loss);
+}
+
+#start-demo {
+    display: block;
+    width: 200px;
+    margin: 20px auto;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #2962ff, #00ffd5);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+#start-demo:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+footer {
+    text-align: center;
+    margin-top: 30px;
+    color: rgba(255,255,255,0.5);
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
