@@ -1,19 +1,47 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Analysis — InvestGPT</title>
-  <link rel="stylesheet" href="/css/analysis.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InvestGPT — Аналіз</title>
+    <link rel="stylesheet" href="/css/analysis.css">
+    <link rel="shortcut icon" type="image/x-icon" href="/images/favicon.ico">
 </head>
 <body>
-  <main class="analysis-root">
-    <header>
-      <h1>Результат аналізу</h1>
-    </header>
-    <section id="analysis-card"></section>
-    <button id="to-demo">Перейти до демо</button>
-  </main>
-  <script src="/js/analysis_card.js"></script>
+    <main class="analysis-root">
+        <header>
+            <h1>Аналіз інвестиційного профілю</h1>
+        </header>
+        
+        <section id="analysis-card">
+            <div class="card">
+                <h2>Ваш результат</h2>
+                <div class="metrics">
+                    <div class="metric">
+                        <h3>Готовність</h3>
+                        <div id="readiness-score">...</div>
+                    </div>
+                    <div class="metric">
+                        <h3>Tier</h3>
+                        <div id="lead-tier">...</div>
+                    </div>
+                    <div class="metric">
+                        <h3>Потенціал</h3>
+                        <div id="chance-range">...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <div class="cta">
+            <button id="to-demo" onclick="location.href='/demo/'">Перейти до демо</button>
+        </div>
+        
+        <p class="small">* Це освітня демонстрація. Не є інвестиційною порадою.</p>
+    </main>
+    
+    <script src="/js/jquery-3.4.1.min.js"></script>
+    <script src="/js/scoring.js"></script>
+    <script src="/js/analysis_card.js"></script>
 </body>
 </html>
