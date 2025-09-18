@@ -53,15 +53,27 @@
 
     // Запит до OpenAI
     async function askOpenAI(message) {
+        console.debug('askOpenAI start', message);
         const typing = showTyping();
         try {
             context.messages.push({ role: 'user', content: message });
-            
+            // Use AbortController to avoid hanging reads
+            const ac = new AbortController();
+            const timeoutMs = 30000; // 30s
+            const timeoutId = setTimeout(() => ac.abort(), timeoutMs);
+
             const response = await fetch('../api/openai.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(context)
+                body: JSON.stringify(context),
+                signal: ac.signal
             });
+            clearTimeout(timeoutId);
+
+            console.debug('askOpenAI response ok?', response.ok, 'status', response.status);
+
+            if (!response.ok) throw new Error('API Error: ' + response.status);
+            if (!response.body) throw new Error('No response body from API');
 
             if (!response.ok) throw new Error('API Error');
             
@@ -132,6 +144,8 @@
         }
     });
 
-    // Початкове повідомлення
-    appendMessage('Вітаю! Я — ваш AI-консультант з інвестицій. Для початку, розкажіть про вашу головну інвестиційну мету.');
+    // Початкове повідомлення (додаємо лише якщо немає вже бот-повідомлення в HTML)
+    if (!document.querySelector('.bubble.bot')) {
+        appendMessage('Вітаю! Я — ваш AI-консультант з інвестицій. Для початку, розкажіть про вашу головну інвестиційну мету.');
+    }
 })();
