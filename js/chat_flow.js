@@ -57,7 +57,7 @@
         try {
             context.messages.push({ role: 'user', content: message });
             
-            const response = await fetch('lander/invest-gpt/api/openai.php', {
+            const response = await fetch('../api/openai.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(context)
@@ -96,7 +96,7 @@
             
             // Перевірка на перехід до наступного етапу
             if (accumulated.includes('[TO_ANALYSIS]')) {
-                setTimeout(() => { window.location.href = '/analysis/'; }, 2000);
+                setTimeout(() => { window.location.href = '../analysis/'; }, 2000);
             }
             
         } catch (e) {
