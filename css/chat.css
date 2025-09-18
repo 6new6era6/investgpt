@@ -1,0 +1,17 @@
+/* AI-технологічний стиль для сторінки чату */
+:root{
+  --bg:#0b0f14; --panel:#0f1720; --accent:#00ffd5; --accent-2:#6c8cff; --text:#e6eef8;
+}
+html,body{height:100%;margin:0;font-family:Inter, 'Roboto', 'Segoe UI', system-ui, monospace;background:linear-gradient(180deg,#05060a 0%,#0b0f14 60%);color:var(--text)}
+.chat-root{display:flex;flex-direction:column;height:100vh;padding:24px}
+header h1{margin:0 0 12px;font-weight:600;letter-spacing:0.3px}
+.chat-window{flex:1;overflow:auto;padding:12px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);box-shadow:0 6px 30px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.03)}
+.bubble{display:inline-block;padding:10px 14px;margin:8px 0;border-radius:12px;max-width:75%;line-height:1.4}
+.bubble.bot{background:linear-gradient(90deg, rgba(108,140,255,0.1), rgba(0,255,213,0.05));border:1px solid rgba(108,140,255,0.18);color:var(--text)}
+.bubble.user{margin-left:auto;background:linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.04)}
+.chat-form{display:flex;gap:8px;margin-top:12px}
+.chat-form input{flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02);color:var(--text)}
+.chat-form button{background:linear-gradient(90deg,var(--accent-2),var(--accent));border:none;padding:10px 14px;border-radius:10px;color:#001;cursor:pointer;font-weight:600}
+
+/* small responsive */
+@media(max-width:600px){.chat-root{padding:12px}.bubble{max-width:90%}}
