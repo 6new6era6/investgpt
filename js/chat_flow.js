@@ -161,11 +161,14 @@ const logger = {
                     let data;
                     try {
                         data = JSON.parse(payload);
-                        if (data.debug) {
-                            logger.debug('Server Debug', { 
-                                id: requestId,
-                                message: data.debug 
-                            });
+                        if (data.console) {
+                            // Handle server-side logs
+                            const log = data.console;
+                            if (log.type === 'debug') {
+                                console.debug(`[${log.time}] ${log.label}:`, log.data);
+                            } else if (log.type === 'error') {
+                                console.error(`[${log.time}] ${log.label}:`, log.data);
+                            }
                             continue;
                         }
                     } catch (err) {

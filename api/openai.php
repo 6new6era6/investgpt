@@ -1,11 +1,28 @@
 <?php
-// Debug helper
+// Debug helpers
 function debug_log($msg, $data = null) {
-    $log = ['time' => microtime(true), 'msg' => $msg];
-    if ($data !== null) $log['data'] = $data;
-    error_log('OpenAI-Debug: ' . json_encode($log));
-    // Also send to client for debugging
-    echo "data: " . json_encode(['debug' => $msg]) . "\n\n";
+    log_to_console('debug', $msg, $data);
+}
+
+function error_log_to_console($msg, $data = null) {
+    log_to_console('error', $msg, $data);
+}
+
+function log_to_console($type, $msg, $data = null) {
+    $time = gmdate('c'); // ISO 8601 format, matches JavaScript's toISOString()
+    $log = [
+        'time' => $time,
+        'label' => $msg,
+        'data' => $data
+    ];
+    error_log('[PHP] ' . json_encode($log));
+    // Send to client for console output
+    echo "data: " . json_encode(['console' => [
+        'type' => $type,
+        'time' => $time,
+        'label' => '[PHP] ' . $msg,
+        'data' => $data
+    ]]) . "\n\n";
     if (ob_get_level()) ob_flush();
     flush();
 }
@@ -33,6 +50,7 @@ if (!$OPENAI_API_KEY) {
     }
 }
 if (!$OPENAI_API_KEY) {
+    error_log_to_console('Configuration Error', 'OpenAI API key not configured');
     echo "data: " . json_encode(['error' => 'OpenAI API key not configured. Set OPENAI_API_KEY env or place key in .openai_key']) . "\n\n";
     exit;
 }
