@@ -104,6 +104,48 @@ debug_log('Setting up response streaming');
 // Буфер для накопичення даних між викликами
 $streamBuffer = '';
 
+// Функція для пошуку повного JSON об'єкта в тексті
+function findCompleteJson($text, &$start, &$end) {
+    $len = strlen($text);
+    $inString = false;
+    $escape = false;
+    $depth = 0;
+    $start = -1;
+    
+    for ($i = 0; $i < $len; $i++) {
+        $char = $text[$i];
+        
+        if ($escape) {
+            $escape = false;
+            continue;
+        }
+        
+        if ($char === '\\') {
+            $escape = true;
+            continue;
+        }
+        
+        if ($char === '"' && !$escape) {
+            $inString = !$inString;
+            continue;
+        }
+        
+        if (!$inString) {
+            if ($char === '{') {
+                if ($depth === 0) $start = $i;
+                $depth++;
+            } else if ($char === '}') {
+                $depth--;
+                if ($depth === 0 && $start !== -1) {
+                    $end = $i + 1;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use (&$streamBuffer) {
     static $chunkCount = 0;
     $chunkCount++;
@@ -111,32 +153,48 @@ curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use (&$streamBuffer
     // Додаємо нові дані до буфера
     $streamBuffer .= $data;
     
-    // Шукаємо завершені події SSE (data: ... + порожній рядок)
-    while (preg_match('/^data: (.+?)\n\n/s', $streamBuffer, $matches)) {
-        $event = $matches[0];
-        $payload = trim($matches[1]);
+    // Шукаємо та обробляємо всі повні події у буфері
+    while (true) {
+        // Спочатку шукаємо маркер "data: "
+        $pos = strpos($streamBuffer, 'data: ');
+        if ($pos === false) break;
         
-        // Видаляємо оброблену подію з буфера
-        $streamBuffer = substr($streamBuffer, strlen($event));
+        // Отримуємо текст після "data: "
+        $text = substr($streamBuffer, $pos + 6);
         
-        // Обробка події
-        if ($payload === '[DONE]') {
+        if (trim($text) === '[DONE]') {
+            // Спеціальний маркер кінця потоку
             echo "data: [DONE]\n\n";
-        } else if (strpos($payload, '"console"') !== false) {
-            // Наш лог
-            echo "data: __DEBUG__" . $payload . "\n\n";
-        } else if (strpos($payload, '"choices"') !== false) {
-            // OpenAI chunk
-            echo "data: " . $payload . "\n\n";
-        } else {
-            // Інші дані (на всяк випадок)
-            error_log("[Debug] Unknown payload type: " . substr($payload, 0, 100));
-            echo "data: " . $payload . "\n\n";
+            $streamBuffer = substr($streamBuffer, $pos + 11);
+            continue;
         }
         
-        // Відправляємо відразу
-        if (ob_get_level()) ob_flush();
-        flush();
+        // Шукаємо повний JSON об'єкт
+        $start = $end = 0;
+        if (findCompleteJson($text, $start, $end)) {
+            $json = substr($text, $start, $end - $start);
+            
+            // Перевіряємо тип даних
+            if (strpos($json, '"console"') !== false) {
+                echo "data: __DEBUG__" . $json . "\n\n";
+            } else {
+                echo "data: " . $json . "\n\n";
+            }
+            
+            // Видаляємо оброблені дані з буфера
+            $streamBuffer = substr($streamBuffer, $pos + 6 + $end);
+            
+            if (ob_get_level()) ob_flush();
+            flush();
+        } else {
+            // Якщо не знайшли повний JSON, чекаємо наступної порції даних
+            break;
+        }
+    }
+    
+    // Очищаємо старі дані з буфера (залишаємо тільки останні 1000 байт)
+    if (strlen($streamBuffer) > 1000) {
+        $streamBuffer = substr($streamBuffer, -1000);
     }
     
     error_log(sprintf(
