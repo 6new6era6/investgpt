@@ -111,102 +111,104 @@ const logger = {
             const reader = response.body.getReader();
             let accumulated = '';
             let lastChunkTime = Date.now();
-            
+
             typing.remove();
             const botMessage = await appendMessage('', 'bot', false);
-            
-            let chunkCount = 0;
-            while (true) {
-                const timeSinceLastChunk = Date.now() - lastChunkTime;
-                if (timeSinceLastChunk > 10000) { // 10s without data
-                    logger.debug('Stream Timeout', {
-                        id: requestId,
-                        timeSinceLastChunk,
-                        totalChunks: chunkCount
-                    });
-                    throw new Error('Stream timeout - no data received for 10s');
-                }
 
+            // Buffer for SSE style parsing
+            let buffer = '';
+            let chunkCount = 0;
+
+            while (true) {
                 const {value, done} = await reader.read();
                 lastChunkTime = Date.now();
-                
+
                 if (done) {
-                    logger.debug('Stream Complete', {
-                        id: requestId,
-                        totalChunks: chunkCount,
-                        totalLength: accumulated.length
-                    });
+                    logger.debug('Stream Complete', { id: requestId, totalChunks: chunkCount, totalLength: accumulated.length });
                     break;
                 }
-                
+
                 const chunk = new TextDecoder().decode(value);
                 chunkCount++;
-                
-                logger.debug('Chunk Received', {
-                    id: requestId,
-                    chunkNumber: chunkCount,
-                    chunkLength: chunk.length
-                });
+                logger.debug('Chunk Received', { id: requestId, chunkNumber: chunkCount, chunkLength: chunk.length });
 
-                const lines = chunk.split('\n');
-                for (const line of lines) {
-                    if (!line.trim() || !line.startsWith('data: ')) continue;
-                    
-                    let payload = line.slice(5).trim();
-                    if (payload === '[DONE]') {
+                buffer += chunk;
+
+                // Process all complete SSE events (separated by \n\n)
+                while (true) {
+                    const idx = buffer.indexOf('\n\n');
+                    if (idx === -1) break;
+
+                    const raw = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+
+                    // Parse SSE block
+                    const lines = raw.split('\n');
+                    let event = 'message';
+                    let dataLines = [];
+                    for (const ln of lines) {
+                        if (ln.startsWith('event:')) {
+                            event = ln.slice(6).trim();
+                        } else if (ln.startsWith('data:')) {
+                            dataLines.push(ln.slice(5).trim());
+                        }
+                    }
+                    const dataStr = dataLines.join('\n');
+
+                    if (event === 'php-debug') {
+                        try {
+                            const dbg = JSON.parse(dataStr);
+                            console.debug(`[${dbg.time}] ${dbg.label}:`, dbg.data);
+                        } catch (e) {
+                            console.debug('php-debug (raw):', dataStr);
+                        }
+                        continue;
+                    }
+
+                    if (event === 'done') {
                         logger.debug('Stream Done Marker', { id: requestId });
                         continue;
                     }
-                    
-                    // Перевіряємо чи це debug-повідомлення
-                    const isDebug = payload.startsWith('__DEBUG__');
-                    if (isDebug) {
-                        payload = payload.slice(9); // Видаляємо маркер
-                    }
-                    
-                    let data;
+
+                    // event === 'message'
+                    let parsed;
                     try {
-                        data = JSON.parse(payload);
-                        if (isDebug && data.console) {
-                            // Handle server-side logs
-                            const log = data.console;
-                            if (log.type === 'debug') {
-                                console.debug(`[${log.time}] ${log.label}:`, log.data);
-                            } else if (log.type === 'error') {
-                                console.error(`[${log.time}] ${log.label}:`, log.data);
-                            }
-                            continue;
-                        }
+                        parsed = JSON.parse(dataStr);
                     } catch (err) {
-                        // Тільки логуємо помилки парсингу для не-debug повідомлень
-                        if (!isDebug) {
-                            logger.error('Parse Error', {
-                                id: requestId,
-                                error: err,
-                                payload
-                            });
-                        }
+                        logger.error('Parse Error', { id: requestId, error: err, payload: dataStr });
                         continue;
                     }
-                    
-                    if (data.error) {
-                        logger.error('API Error', {
-                            id: requestId,
-                            error: data.error
-                        });
-                        throw new Error(data.error);
+
+                    // Extract content: OpenAI chunk has choices[].delta.content or choices[].delta
+                    let content = '';
+                    try {
+                        if (parsed.choices && Array.isArray(parsed.choices)) {
+                            for (const c of parsed.choices) {
+                                if (c.delta && typeof c.delta === 'object') {
+                                    if (c.delta.content) content += c.delta.content;
+                                } else if (c.text) {
+                                    content += c.text;
+                                }
+                            }
+                        } else if (parsed.content) {
+                            content = parsed.content;
+                        }
+                    } catch (e) {
+                        // ignore
                     }
 
-                    const content = data.content || '';
                     accumulated += content;
                     botMessage.textContent = accumulated;
                     chat.scrollTop = chat.scrollHeight;
-                    
-                    logger.debug('Content Update', {
-                        id: requestId,
-                        newContentLength: content.length,
-                        totalLength: accumulated.length
-                    });
+
+                    logger.debug('Content Update', { id: requestId, newContentLength: content.length, totalLength: accumulated.length });
+                }
+
+                // safety timeout
+                const timeSinceLastChunk = Date.now() - lastChunkTime;
+                if (timeSinceLastChunk > 30000) {
+                    logger.debug('Stream Timeout', { id: requestId, timeSinceLastChunk, totalChunks: chunkCount });
+                    throw new Error('Stream timeout - no data received for 30s');
                 }
             }
             

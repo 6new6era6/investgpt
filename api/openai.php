@@ -101,170 +101,54 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
 // Stream the response back to client as SSE
 debug_log('Setting up response streaming');
 
-// Буфер для накопичення даних між викликами
-$streamBuffer = '';
-
-// Функція для пошуку повного JSON об'єкта в тексті
-function findCompleteJson($text, &$start, &$end) {
-    $len = strlen($text);
-    $inString = false;
-    $escape = false;
-    $objectDepth = 0;
-    $arrayDepth = 0;
-    $start = -1;
-    
-    for ($i = 0; $i < $len; $i++) {
-        $char = $text[$i];
-        
-        // Пропускаємо пробільні символи до початку об'єкта/масиву
-        if ($start === -1 && preg_match('/\s/', $char)) {
-            continue;
-        }
-        
-        if ($escape) {
-            $escape = false;
-            continue;
-        }
-        
-        if ($char === '\\' && !$escape) {
-            $escape = true;
-            continue;
-        }
-        
-        if ($char === '"' && !$escape) {
-            $inString = !$inString;
-            continue;
-        }
-        
-        if (!$inString) {
-            switch ($char) {
-                case '{':
-                    if ($objectDepth === 0 && $arrayDepth === 0) {
-                        $start = $i;
-                    }
-                    $objectDepth++;
-                    break;
-                    
-                case '}':
-                    $objectDepth--;
-                    if ($objectDepth === 0 && $arrayDepth === 0 && $start !== -1) {
-                        // Знайшли кінець об'єкта
-                        $end = $i + 1;
-                        // Перевіряємо що це валідний JSON
-                        $json = substr($text, $start, $end - $start);
-                        if (json_decode($json) !== null) {
-                            return true;
-                        }
-                        // Якщо не валідний - продовжуємо пошук
-                        $start = -1;
-                    }
-                    break;
-                    
-                case '[':
-                    if ($objectDepth === 0 && $arrayDepth === 0) {
-                        $start = $i;
-                    }
-                    $arrayDepth++;
-                    break;
-                    
-                case ']':
-                    $arrayDepth--;
-                    if ($arrayDepth === 0 && $objectDepth === 0 && $start !== -1) {
-                        // Знайшли кінець масиву
-                        $end = $i + 1;
-                        // Перевіряємо що це валідний JSON
-                        $json = substr($text, $start, $end - $start);
-                        if (json_decode($json) !== null) {
-                            return true;
-                        }
-                        // Якщо не валідний - продовжуємо пошук
-                        $start = -1;
-                    }
-                    break;
-            }
-        }
-    }
-    return false;
-}
-
-curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use (&$streamBuffer) {
+// We will forward OpenAI's streamed "data: {...}\n\n" blocks as SSE events.
+curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
     static $chunkCount = 0;
     $chunkCount++;
-    
-    // Додаємо нові дані до буфера
-    $streamBuffer .= $data;
-    
-    // Розділяємо буфер на рядки
-    $lines = explode("\n", $streamBuffer);
-    $newBuffer = '';
-    $processedAny = false;
-    
-    // Обробляємо кожен рядок
-    foreach ($lines as $i => $line) {
-        $line = trim($line);
-        if (empty($line)) continue;
-        
-        // Якщо це не останній рядок або він закінчується на \n
-        $isComplete = ($i < count($lines) - 1) || (substr($streamBuffer, -1) === "\n");
-        
-        if (strpos($line, 'data: ') === 0) {
-            $payload = substr($line, 6);
-            
+
+    // The OpenAI stream typically contains one or more "data: ...\n\n" blocks.
+    // Split incoming data by double-newline to get candidate blocks.
+    $parts = explode("\n\n", $data);
+    foreach ($parts as $part) {
+        $part = trim($part);
+        if ($part === '') continue;
+
+        // Each part may contain a prefix 'data: '. Handle it.
+        if (strpos($part, 'data: ') === 0) {
+            $payload = substr($part, 6);
+            // If OpenAI signals done
             if ($payload === '[DONE]') {
+                echo "event: done\n";
                 echo "data: [DONE]\n\n";
-                $processedAny = true;
+                if (ob_get_level()) ob_flush();
+                flush();
                 continue;
             }
-            
-            // Якщо рядок не закінчений, зберігаємо його
-            if (!$isComplete) {
-                $newBuffer = $line;
-                break;
-            }
-            
-            // Перевіряємо чи це повний JSON
-            $start = $end = 0;
-            if (findCompleteJson($payload, $start, $end)) {
-                $json = substr($payload, $start, $end - $start);
-                
-                // Перевіряємо тип даних
-                if (strpos($json, '"console"') !== false) {
-                    echo "data: __DEBUG__" . $json . "\n\n";
-                } else {
-                    echo "data: " . $json . "\n\n";
-                }
-                $processedAny = true;
+
+            // If this payload looks like our debug object (we may still send server logs separately),
+            // we will emit a php-debug event when payload contains '"console"' key.
+            if (strpos($payload, '"console"') !== false) {
+                echo "event: php-debug\n";
+                echo "data: " . $payload . "\n\n";
             } else {
-                $newBuffer .= $line . "\n";
+                // Forward OpenAI payload as a message event so client can parse it reliably.
+                echo "event: message\n";
+                echo "data: " . $payload . "\n\n";
             }
+            if (ob_get_level()) ob_flush();
+            flush();
         } else {
-            $newBuffer .= $line . "\n";
+            // If there's no 'data: ' prefix, send it as data to the client to avoid dropping content.
+            echo "event: message\n";
+            echo "data: " . $part . "\n\n";
+            if (ob_get_level()) ob_flush();
+            flush();
         }
     }
-    
-    // Оновлюємо буфер
-    $streamBuffer = $newBuffer;
-    
-    // Відправляємо дані якщо щось обробили
-    if ($processedAny && ob_get_level()) {
-        ob_flush();
-        flush();
-    }
-    
-    // Очищаємо старі дані з буфера (залишаємо тільки останні 1000 байт)
-    if (strlen($streamBuffer) > 1000) {
-        $streamBuffer = substr($streamBuffer, -1000);
-    }
-    
-    error_log(sprintf(
-        '[PHP Debug] Chunk #%d (in: %d bytes, buffer: %d bytes)', 
-        $chunkCount, 
-        strlen($data),
-        strlen($streamBuffer)
-    ));
-    
-    return strlen($data);
-    
+
+    // Log chunk info for server-side debugging
+    error_log(sprintf('[PHP Debug] Forwarded chunk #%d (in: %d bytes, parts: %d)', $chunkCount, strlen($data), count($parts)));
+
     return strlen($data);
 });
 
