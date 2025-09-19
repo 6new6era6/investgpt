@@ -93,137 +93,34 @@ const logger = {
             });
             clearTimeout(timeoutId);
 
-            logger.debug('Response Received', {
-                id: requestId,
-                ok: response.ok,
-                status: response.status,
-                headers: Object.fromEntries([...response.headers])
-            });
-
+            logger.debug('Response Received', { id: requestId, ok: response.ok, status: response.status });
             if (!response.ok) throw new Error('API Error: ' + response.status);
-            if (!response.body) throw new Error('No response body from API');
 
-            if (!response.ok) {
-                throw new Error(`API Error: ${response.status} ${response.statusText}`);
-            }
-            
-            logger.debug('Starting Stream', { id: requestId });
-            const reader = response.body.getReader();
-            let accumulated = '';
-            let lastChunkTime = Date.now();
-
+            const json = await response.json();
             typing.remove();
             const botMessage = await appendMessage('', 'bot', false);
 
-            // Buffer for SSE style parsing
-            let buffer = '';
-            let chunkCount = 0;
-
-            while (true) {
-                const {value, done} = await reader.read();
-                lastChunkTime = Date.now();
-
-                if (done) {
-                    logger.debug('Stream Complete', { id: requestId, totalChunks: chunkCount, totalLength: accumulated.length });
-                    break;
-                }
-
-                const chunk = new TextDecoder().decode(value);
-                chunkCount++;
-                logger.debug('Chunk Received', { id: requestId, chunkNumber: chunkCount, chunkLength: chunk.length });
-
-                buffer += chunk;
-
-                // Process all complete SSE events (separated by \n\n)
-                while (true) {
-                    const idx = buffer.indexOf('\n\n');
-                    if (idx === -1) break;
-
-                    const raw = buffer.slice(0, idx);
-                    buffer = buffer.slice(idx + 2);
-
-                    // Parse SSE block
-                    const lines = raw.split('\n');
-                    let event = 'message';
-                    let dataLines = [];
-                    for (const ln of lines) {
-                        if (ln.startsWith('event:')) {
-                            event = ln.slice(6).trim();
-                        } else if (ln.startsWith('data:')) {
-                            dataLines.push(ln.slice(5).trim());
-                        }
-                    }
-                    const dataStr = dataLines.join('\n');
-
-                    if (event === 'php-debug') {
-                        try {
-                            const dbg = JSON.parse(dataStr);
-                            console.debug(`[${dbg.time}] ${dbg.label}:`, dbg.data);
-                        } catch (e) {
-                            console.debug('php-debug (raw):', dataStr);
-                        }
-                        continue;
-                    }
-
-                    if (event === 'done') {
-                        logger.debug('Stream Done Marker', { id: requestId });
-                        continue;
-                    }
-
-                    // event === 'message'
-                    let parsed;
-                    try {
-                        parsed = JSON.parse(dataStr);
-                    } catch (err) {
-                        logger.error('Parse Error', { id: requestId, error: err, payload: dataStr });
-                        continue;
-                    }
-
-                    // Extract content: OpenAI chunk has choices[].delta.content or choices[].delta
-                    let content = '';
-                    try {
-                        if (parsed.choices && Array.isArray(parsed.choices)) {
-                            for (const c of parsed.choices) {
-                                if (c.delta && typeof c.delta === 'object') {
-                                    if (c.delta.content) content += c.delta.content;
-                                } else if (c.text) {
-                                    content += c.text;
-                                }
-                            }
-                        } else if (parsed.content) {
-                            content = parsed.content;
-                        }
-                    } catch (e) {
-                        // ignore
-                    }
-
-                    accumulated += content;
-                    botMessage.textContent = accumulated;
-                    chat.scrollTop = chat.scrollHeight;
-
-                    logger.debug('Content Update', { id: requestId, newContentLength: content.length, totalLength: accumulated.length });
-                }
-
-                // safety timeout
-                const timeSinceLastChunk = Date.now() - lastChunkTime;
-                if (timeSinceLastChunk > 30000) {
-                    logger.debug('Stream Timeout', { id: requestId, timeSinceLastChunk, totalChunks: chunkCount });
-                    throw new Error('Stream timeout - no data received for 30s');
-                }
+            // If server indicates demo mode or error
+            if (json.error) {
+                logger.error('API returned error', json.error);
+                await appendMessage(json.error + (json.demo ? ' (demo mode)' : ''), 'bot');
+                return;
             }
-            
-            context.messages.push({ role: 'assistant', content: accumulated });
-            logger.debug('Message Complete', {
-                id: requestId,
-                finalLength: accumulated.length,
-                messageCount: context.messages.length
-            });
-            
-            // Перевірка на перехід до наступного етапу
-            if (accumulated.includes('[TO_ANALYSIS]')) {
-                logger.debug('Analysis Redirect', { id: requestId });
-                setTimeout(() => { window.location.href = '../analysis/'; }, 2000);
+
+            // If server already returned structured JSON, handle accordingly
+            if (json.reply) {
+                botMessage.textContent = json.reply;
+                context.messages.push({ role: 'assistant', content: json.reply });
+                if (json.action === 'analysis' || (json.reply && json.reply.includes('[TO_ANALYSIS]'))) {
+                    setTimeout(() => { window.location.href = '../analysis/'; }, 1200);
+                }
+            } else {
+                // Merge any direct keys from server response into a pretty output
+                botMessage.textContent = JSON.stringify(json, null, 2);
+                context.messages.push({ role: 'assistant', content: botMessage.textContent });
             }
+
+            logger.debug('Message Complete', { id: requestId, messageCount: context.messages.length });
             
         } catch (e) {
             logger.error('Request Failed', {

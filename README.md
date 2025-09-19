@@ -13,6 +13,8 @@
 - `/js/` — логіка фронту: `chat_flow.js`, `scoring.js`, `analysis_card.js`, `demo_sim.js`, `handoff.js`
 - `/api/openai.php` — бекенд-проксі (заглушка або реальна імплементація)
 
+Note: `/api/openai.php` has been converted to a non-streaming JSON proxy. It expects POST { messages: [...] } and returns a single JSON response. If `OPENAI_API_KEY` is not set it replies with { "demo": true } to enable client-side demo mode.
+
 Запуск локально:
 
 ```bash
