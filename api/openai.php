@@ -1,126 +1,119 @@
 <?php
-// Simple debug helpers (log to server error log)
-function debug_log($msg, $data = null) {
-    $time = gmdate('c');
-    error_log(sprintf('[%s] DEBUG: %s %s', $time, $msg, json_encode($data)));
-}
+// api/openai.php — JSON proxy без стрімінгу (Keitaro friendly)
 
-function error_log_to_console($msg, $data = null) {
-    $time = gmdate('c');
-    error_log(sprintf('[%s] ERROR: %s %s', $time, $msg, json_encode($data)));
-}
-
-// Return JSON responses from this script
 header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: Content-Type');
 
-// Configuration
-$OPENAI_API_KEY = getenv('OPENAI_API_KEY');
-// Fallback: try reading from a local file (placed outside webroot or protected), e.g. ../.openai_key
-if (!$OPENAI_API_KEY) {
-    // Try a PHP file inside api/ that returns the key: api/openai_key.php
+// 1) Ключ
+$apiKey = getenv('OPENAI_API_KEY');
+if (!$apiKey) {
+    // опційно: підвантаження з файлів
     $phpKeyFile = __DIR__ . '/openai_key.php';
     if (file_exists($phpKeyFile)) {
         $val = include $phpKeyFile;
-        if ($val && is_string($val)) {
-            $OPENAI_API_KEY = trim($val);
-        }
+        if ($val && is_string($val)) $apiKey = trim($val);
     }
     $keyFile = __DIR__ . '/../.openai_key';
-    if (file_exists($keyFile)) {
-        $OPENAI_API_KEY = trim(file_get_contents($keyFile));
+    if (!$apiKey && file_exists($keyFile)) {
+        $apiKey = trim(file_get_contents($keyFile));
     }
 }
-if (!$OPENAI_API_KEY) {
-    error_log_to_console('Configuration Error', 'OpenAI API key not configured');
-    // Provide a helpful JSON response so clients can switch to demo mode
-    echo json_encode(['error' => 'OpenAI API key not configured. Running in demo mode.', 'demo' => true]);
+if (!$apiKey) {
+    http_response_code(200);
+    echo json_encode(["error" => "NO_API_KEY", "message" => "OpenAI API key not configured"]);
     exit;
 }
 
-$OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-$MODEL = 'gpt-3.5-turbo';
-$MAX_TOKENS = 600;
-$TEMPERATURE = 0.7;
-
-// Read input
+// 2) Вхід від фронта
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input || !isset($input['messages']) || !is_array($input['messages'])) {
-    echo json_encode(['error' => 'Invalid input: expected { messages: [...] }']);
+    http_response_code(400);
+    echo json_encode(["error" => "INVALID_INPUT"]);
     exit;
 }
+$messages = $input['messages'];
+$model    = $input['model'] ?? 'gpt-4o-mini';
 
-// Insert system prompt to guide strict JSON replies where possible
-array_unshift($input['messages'], [
-    'role' => 'system',
-    'content' => "You are an investment advisor assistant. Reply in JSON when appropriate.\n" .
-                 "If you need more information ask follow-up questions.\n" .
-                 "When ready to move to analysis, include an action field 'action':'analysis' or include the token [TO_ANALYSIS].\n" .
-                 "If you cannot produce structured JSON, reply with plain text and the client will wrap it."
-]);
+// 3) Серверні сигнали (для скорингу/персоналізації)
+$ip        = $_SERVER['REMOTE_ADDR'] ?? null;
+$userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+$device    = (preg_match('/iphone|ipad|android|mobile/i', $userAgent ?? '')) ? 'mobile' : 'desktop';
 
-debug_log('Preparing OpenAI request', ['messages' => count($input['messages'])]);
-
-$ch = curl_init($OPENAI_URL);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Content-Type: application/json',
-    'Authorization: Bearer ' . $OPENAI_API_KEY
-]);
-
-$requestData = [
-    'model' => $MODEL,
-    'messages' => $input['messages'],
-    'temperature' => $TEMPERATURE,
-    'max_tokens' => $MAX_TOKENS,
-    'stream' => false
+// 4) Системний промпт і developer-повідомлення
+$system = [
+    "role" => "system",
+    "content" => implode(" ", [
+        "Ти — AI-аналітик інвест-профілю, який повністю керує воронкою.",
+        "Будь ласка, ВІДПОВІДАЙ СТРОГО У JSON (без додаткового тексту) за схемою:",
+        '{ "reply": "<текст укр>", "action": "ask|show_analysis|goto_demo|postdemo|goto_form",',
+        '  "updates": { "answers": {...}, "readiness_score": <num>, "lead_tier": "A|B|C", "chance_range": "70–95%", "segment": "...", "currency": "UAH|PLN|USD|EUR|TRY" },',
+        '  "demo": { "asset": "BTC/UAH" } }',
+        "Де action описує наступний крок. Не давай фінансових гарантій; використовуй 'оцінний діапазон', 'симуляція', 'не гарантія'. Мова — українська."
+    ])
 ];
 
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
+$serverSignals = [
+    "role" => "system",
+    "content" => json_encode([
+        "server_signals" => [
+            "ip" => $ip,
+            "user_agent" => $userAgent,
+            "device" => $device
+        ]
+    ], JSON_UNESCAPED_UNICODE)
+];
 
-$resp = curl_exec($ch);
-if (curl_errno($ch)) {
-    $err = curl_error($ch);
-    error_log('cURL error: ' . $err);
-    echo json_encode(['error' => 'OpenAI API error: ' . $err]);
-    exit;
-}
+// 5) Виклик OpenAI Chat Completions (без stream)
+$body = [
+    "model" => $model,
+    "messages" => array_merge([$system, $serverSignals], $messages),
+    "temperature" => 0.6,
+    "max_tokens" => 700
+];
 
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$ch = curl_init("https://api.openai.com/v1/chat/completions");
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_HTTPHEADER => [
+        "Content-Type: application/json",
+        "Authorization: Bearer {$apiKey}"
+    ],
+    CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_UNICODE),
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 35
+]);
+
+$response = curl_exec($ch);
+$errno = curl_errno($ch);
+$http  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
-if ($httpCode < 200 || $httpCode >= 300) {
-    error_log('OpenAI returned HTTP ' . $httpCode . ' body: ' . substr($resp, 0, 2000));
-    echo json_encode(['error' => 'OpenAI API returned HTTP ' . $httpCode]);
+if ($errno) {
+    http_response_code(502);
+    echo json_encode(["error" => "CURL_ERROR", "message" => $errno]);
+    exit;
+}
+if ($http < 200 || $http >= 300) {
+    http_response_code($http ?: 500);
+    echo json_encode(["error" => "OPENAI_HTTP_$http", "raw" => json_decode($response, true)]);
     exit;
 }
 
-$json = json_decode($resp, true);
-if (!$json) {
-    error_log('Failed to decode OpenAI response: ' . json_last_error_msg());
-    echo json_encode(['error' => 'Invalid response from OpenAI']);
-    exit;
-}
+$data = json_decode($response, true);
+$content = $data['choices'][0]['message']['content'] ?? "";
 
-// Extract assistant text
-$assistant_text = '';
-if (isset($json['choices'][0]['message']['content'])) {
-    $assistant_text = $json['choices'][0]['message']['content'];
-} elseif (isset($json['choices'][0]['text'])) {
-    $assistant_text = $json['choices'][0]['text'];
+// 6) Очікуємо, що content — валідний JSON за протоколом
+$parsed = json_decode($content, true);
+if (is_array($parsed) && isset($parsed['reply'], $parsed['action'])) {
+    echo json_encode($parsed, JSON_UNESCAPED_UNICODE);
+} else {
+    // Фолбек: загортаємо як ask
+    echo json_encode([
+        "reply" => trim($content) ?: "Дякую! Продовжимо. Розкажіть трохи детальніше.",
+        "action" => "ask",
+        "updates" => new stdClass(),
+        "demo" => new stdClass()
+    ], JSON_UNESCAPED_UNICODE);
 }
-
-// Attempt to parse assistant_text as JSON. If it's valid JSON, return it directly.
-$decoded = json_decode($assistant_text, true);
-if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-    echo json_encode($decoded);
-    exit;
-}
-
-// Not JSON — return a safe wrapper
-echo json_encode([
-    'reply' => $assistant_text,
-    'action' => (strpos($assistant_text, '[TO_ANALYSIS]') !== false) ? 'analysis' : 'ask'
-]);
 
